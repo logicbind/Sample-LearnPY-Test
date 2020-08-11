@@ -1,0 +1,133 @@
+https://github.com/trekhleb/learn-python.git
+# pip install calendar
+# include /.env
+#sample run::   -s windows  -e dev -se 2020-05-01 -hf serverlist.json -i form_field_data.json
+#Dependencies
+import requests
+import json
+import dotenv
+import sys
+import os
+import argparse
+import datetime
+import logging
+import datetime
+#import pytz
+
+from time import strptime
+from dotenv import load_dotenv
+from pytz import timezone
+
+
+#user defined inputs using flags, stored to "args"
+def get_args():
+    parser = argparse.ArgumentParser('update CHG request form')
+    parser.add_argument('-s', '--os', help='System OS (ex. windows, linux, all)', default='all', action='store')
+    parser.add_argument('-e', '--environment', help='Environment (ex. dev, int, prod, all)', choices=['dev', 'Development', 'int', 'Inregration', 'prod', 'Production', 'all'], required=True, action='store')
+    parser.add_argument('-se', '--startdate', help='The Start Date - format YYYY-MM-DD', required=True)
+    parser.add_argument('-hf', '--hostlistfile', help="filename contiating a list of hostnames, include file ext.", required=True, action='store')
+    parser.add_argument('-i', '--formfile', help="filename containing your chrq-input-field data, include file ext.", required=True, action='store')
+    args = parser.parse_args()
+    print('These are args ', args)
+    return args
+
+
+#convert input:YYYY-MM-DD to strings
+def month_string_to_number(s, text_data):
+    m = {
+        '1': 'January',
+        '2': 'Febuary',
+        '3': 'March',
+        '4': 'April',
+        '5': 'May',
+        '6': 'June',
+        '7': 'July',
+        '8': 'August',
+        '9': 'September',
+        '10': 'October',
+        '11': 'November',
+        '12': 'December',
+        }
+
+    s = arg.startdate
+    st = "18:00:00"
+    t = datetime.datetime.strptime(st, '%H:%M:%S')
+    d = datetime.datetime.strptime(s, '%Y-%m-%d')
+    month = str(d.month)
+    year = str(d.year)
+    name_month = m[month]
+    start_date = str(arg.startdate) +' '+ st 
+    strt_dte = datetime.datetime.strptime(start_date, '%Y-%m-%d %H:%M:%S')
+    strt_dte = strt_dte + datetime.timedelta(hours=7)
+    #strt_dte = strt_dte.replace(tzinfo=timezone('GMT')) #US/Pacific
+    #print (strt_dte.strftime("%Y-%m-%d %H:%M:%S %Z%z"))
+    #print('THis iS my timezone ', strt_dte.tzinfo)
+    end_date = strt_dte + datetime.timedelta(days=1, hours=-12)
+    
+    return (name_month, year, end_date, strt_dte)
+
+
+#load formally created json-file for chrq-form-feilds, save contents to "text_data" for posting
+#load hostlist file, loop, extract hostname then pend to serverlist
+def load_json(fn_formfields, fn_hostlist):
+    try:
+        serverlist = []
+        with open(fn_hostlist) as file:
+            server = json.load(file)
+            print(type(server))
+            for entry in server:
+                server = entry['hostname']
+                serverlist.append(server)
+        with open(fn_formfields) as file:
+            text_data = json.load(file)
+    except ValueError as val_err:
+        logging.warning("Value error: not a json file")
+        sys.exit(1)
+    return text_data, serverlist 
+
+
+#Master data container
+def generate_data(args, hostlist, text_data, end_date, strt_dte):
+    data = {}
+    #format: container[api_key] = value
+    data['short_description'] = args.os + ' ' + args.environment \
+        + ' Patching - ' + name_month + ' ' + year
+    data['description'] = \
+        'We will be applying all available Windows Updates to the following servers\n' \
+        + '\n'.join(hostlist)
+    data['justification'] = text_data["justification"]
+    data['implementation_plan'] = text_data["implementation_plan"]
+    data['risk_impact_analysis'] = text_data["risk_impact_analysis"]
+    data['backout_plan'] = text_data["backout_plan"]
+    data['test_plan'] = text_data["test_plan"]
+    data['category'] = text_data["catagory"]
+    data['business_service'] = text_data["business_service"]
+    data['priority'] = text_data["priority"]
+    data['risk'] = text_data["risk"]
+    data['impact'] = text_data["impact"]
+    data['start_date'] = str(args.startdate) + " 02:00:00"
+    data['start_date'] = str(strt_dte)
+    data['end_date'] = str(end_date)
+    data['assignment_group'] = 'SA Approvers'
+    return data
+
+
+#App execution function
+if __name__ == '__main__':
+    load_dotenv()
+    host = os.getenv('HOSTNAME')
+    api_url = os.getenv('API_URL')
+    url = "https://" + host + api_url+'?sysparm_limit=1'
+    userlogin = os.getenv('USERLOGIN')
+    pwd = os.getenv('PASSWORD')
+    arg = get_args()
+    s = arg.startdate
+    fn_hostlist = str(arg.hostlistfile)
+    fn_formfields = str(arg.formfile)
+    text_data, hostlist = load_json(fn_formfields, fn_hostlist)
+    name_month, year, end_date, strt_dte = month_string_to_number(s, text_data)
+    data = generate_data(arg, hostlist, text_data , end_date, strt_dte)
+    headers = {'Accept': 'application/json',
+           'Content-Type': 'application/json'}
+    response = requests.post(url='https://servicenowdev.jpl.nasa.gov/api/now/table/change_request?sysparm_limit=1', auth=(userlogin, pwd), headers=headers, data=str(data)) #option 1
+    print(response)
